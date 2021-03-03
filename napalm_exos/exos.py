@@ -12,15 +12,22 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
+import re
+import textfsm
+import pathlib
+
+from pprint import pprint as pp
 
 from pyEXOS import EXOS
 
-from napalm_base.base import NetworkDriver
-from napalm_base.exceptions import (
+from napalm.base import NetworkDriver
+from napalm.base.exceptions import (
     ConnectionException,
     MergeConfigException,
     ReplaceConfigException,
     )
+
+
 
 
 class ExosDriver(NetworkDriver):
@@ -62,6 +69,78 @@ class ExosDriver(NetworkDriver):
     def is_alive(self):
         """Implementation of NAPALM method is_alive."""
         return self.device.is_alive()
+
+
+    def cli(self, commands):
+        output = {}
+        for cmd in commands:
+            cmd_output = self.device.send_command_timing(cmd)
+            output[cmd] = cmd_output
+
+        return output
+
+    def get_facts(self):
+        commands = ['show switch', 'show version']
+        result = self.cli(commands)
+        show_switch = result['show switch']
+
+        hostname = ""
+        hostname_match = re.search("SysName:\s+(.*?)\n", show_switch)
+        if hostname_match:
+            hostname = hostname_match.group(1)
+
+        model = ""
+        model_match = re.search("System Type:\s+(.*?)\n", show_switch)
+        if model_match:
+            model = model_match.group(1)
+
+
+        show_version = result['show version']
+        serial_number = ""
+        version = ""
+        serial_match = re.search("Switch\s+:\s(.*?)\s(.*?)\sRev(.*?)IMG:\s(.*?)\n", show_version)
+        if serial_match:
+            serial_number = serial_match.group(2)
+            version = serial_match.group(4)
+
+
+        return {
+                "hostname": hostname.strip(),
+                "vendor": "Extreme Networks",
+                "model": model.strip(),
+                "os_version": version.strip(),
+                'serial_number': serial_number.strip(),
+                }
+
+    def get_interfaces(self):
+        interfaces = {}
+        commands = ['show port information detail']
+        result = self.cli(commands)
+        show_port = result['show port information detail']
+        fsm = textfsm.TextFSM(open(str(pathlib.Path(__file__).parent.absolute()) + "/templates/exos_show_port_information_detail.textfsm"))
+        result = fsm.ParseText(show_port)
+        for line in result:
+            speed = 0
+            if line[1] == '100M': speed = 100
+            if line[1] == '1G': speed = 1000
+            if line[1] == '10G': speed = 10000
+            if line[1] == '25G': speed = 25000
+            if line[1] == '40G': speed = 40000
+            if line[1] == '100G': speed = 100000
+
+            interfaces[line[0]] = {
+                    'is_up': False,
+                    'is_enabled': False,
+                    'description': '',
+                    'last_flapped': -1,
+                    'speed': speed,
+                    'mtu': '',
+                    'mac_address': '',
+                    }
+
+        return interfaces
+
+
 
     def load_merge_candidate(self, filename=None, config=None):
         """Implementation of NAPALM method load_merge_candidate."""

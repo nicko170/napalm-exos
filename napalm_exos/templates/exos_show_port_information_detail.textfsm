@@ -1,0 +1,6 @@
+Value Interface ([\d\:]+)
+Value Speed (\d+[M|G])
+
+Start
+  ^.*Port:\s${Interface}
+  ^.*Admin state:.*with\s+${Speed} -> Record
